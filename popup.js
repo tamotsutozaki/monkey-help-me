@@ -1,5 +1,9 @@
 // popup.js — UI minimalista que exibe a última resposta (ou estado de erro).
 // Lê tudo do chrome.storage.local e re-renderiza ao vivo se algo mudar.
+// Tipos de lastResult:
+//   - "answer" → alternativa (letra/número) em fonte grande
+//   - "open"   → resposta aberta (parágrafo)
+//   - "error"  → mensagem de erro
 
 const $ = (id) => document.getElementById(id);
 
@@ -11,6 +15,7 @@ async function render() {
   ]);
 
   $("answer-view").hidden = true;
+  $("open-view").hidden = true;
   $("message-view").hidden = true;
 
   if (!apiKey) {
@@ -18,13 +23,18 @@ async function render() {
   } else if (!lastResult) {
     showMessage(
       "✳️",
-      'Selecione uma questão na página, clique com o botão direito e escolha "Responder questão".',
+      'Selecione um texto na página e use o botão direito: "Responder alternativa" ou "Explicar / resposta aberta".',
       false
     );
   } else if (lastResult.type === "answer") {
     $("answer").textContent = lastResult.value;
     $("meta").textContent = timeAgo(lastResult.ts);
     $("answer-view").hidden = false;
+  } else if (lastResult.type === "open") {
+    $("open-question").textContent = lastResult.question || "";
+    $("open-text").textContent = lastResult.value || "";
+    $("open-meta").textContent = timeAgo(lastResult.ts);
+    $("open-view").hidden = false;
   } else {
     const icon = lastResult.value === "!" ? "🔑" : lastResult.value === "?" ? "❓" : "⚠️";
     showMessage(icon, lastResult.message || "Erro ao responder.", lastResult.value === "!");
@@ -57,7 +67,8 @@ function renderHistory(history) {
     const snip = document.createElement("span");
     snip.className = "h-snip";
     snip.textContent = item.snippet || "";
-    snip.title = item.snippet || "";
+    // Em respostas abertas, o tooltip mostra a resposta completa; nas demais, a pergunta.
+    snip.title = item.kind === "open" && item.answer ? item.answer : (item.snippet || "");
     li.append(val, snip);
     ul.appendChild(li);
   }

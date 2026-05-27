@@ -1,8 +1,11 @@
 # Macaco Ajuda
 
-Extensão de navegador (Microsoft Edge / Chromium — **Manifest V3**) que responde questões de múltipla escolha selecionadas em qualquer página, usando a **API do Google Gemini**.
+Extensão de navegador (Microsoft Edge / Chromium — **Manifest V3**) que responde **questões de múltipla escolha** e **perguntas abertas** selecionadas em qualquer página, usando a **API do Google Gemini**.
 
-Fluxo: você seleciona o texto da questão → botão direito → **"Responder questão"** → a resposta (só a letra ou número) aparece no **badge sobre o ícone** da extensão e também no **popup**.
+Fluxo: você seleciona o texto → botão direito → escolhe um dos dois itens:
+
+- **"Responder alternativa (letra/número)"** → resposta curta (ex.: `A` ou `3`) no **badge sobre o ícone** e no popup.
+- **"Explicar / resposta aberta"** → resposta objetiva em **até 1 parágrafo** no **popup** (o badge mostra `✓`).
 
 ---
 
@@ -25,11 +28,12 @@ Fluxo: você seleciona o texto da questão → botão direito → **"Responder q
 
 ## Como funciona
 
-- **Service worker** (`background.js`) cria o item de menu de contexto, recebe o texto selecionado, chama a API do Gemini e escreve o resultado no badge.
-- A resposta é exibida de **duas formas**:
-  1. **Badge** sobre o ícone da extensão na barra (forma primária).
-  2. **Popup** minimalista (clique no ícone) mostrando a letra/número em fonte grande, mais um histórico das últimas respostas.
-- Também há um **atalho de teclado** (`Ctrl+Shift+Y` por padrão) como alternativa ao botão direito.
+- **Service worker** (`background.js`) cria os itens de menu de contexto, recebe o texto selecionado, chama a API do Gemini e escreve o resultado.
+- **Dois modos**, escolhidos pelo item do menu de botão direito:
+  - **Alternativa** (`choice`): prompt força só a letra/número, `maxOutputTokens` baixo → resposta no **badge** (forma primária) e no popup em fonte grande.
+  - **Resposta aberta** (`open`): prompt pede resposta direta em até 1 parágrafo, `maxOutputTokens` maior → texto no **popup** (o badge vira `✓`, pois não cabe parágrafo).
+- O **popup** (clique no ícone) também mostra um **histórico** das últimas respostas.
+- Também há um **atalho de teclado** (`Ctrl+Shift+Y` por padrão) que dispara o modo **alternativa**.
 - A API key e o modelo escolhido ficam em `chrome.storage.local` — **nunca** no código.
 
 ---
@@ -59,13 +63,16 @@ Na primeira instalação, como ainda não há API key, a **página de opções a
 
 ## Como usar
 
-1. Em qualquer página, **selecione com o mouse** o texto da questão **incluindo as alternativas**.
-2. **Botão direito** → **"Responder questão"**.
-   *(ou pressione `Ctrl+Shift+Y` com o texto selecionado.)*
-3. Enquanto processa, o badge mostra **`…`**. Em seguida aparece a resposta, por exemplo **`A`** (em verde).
-4. Clique no ícone da extensão para abrir o **popup** com a resposta em fonte grande e o histórico das últimas respostas.
+1. Em qualquer página, **selecione com o mouse** o texto.
+2. **Botão direito** e escolha o modo:
+   - **"Responder alternativa (letra/número)"** — para múltipla escolha. Selecione a questão **incluindo as alternativas**. *(ou pressione `Ctrl+Shift+Y`.)*
+   - **"Explicar / resposta aberta"** — para perguntas abertas/teóricas. Ex.: *"O que é um algoritmo?"*, *"Escreva um exemplo de senha forte"*, *"Em que ano o HTML lançou sua primeira versão?"*.
+3. Enquanto processa, o badge mostra **`…`**. Depois:
+   - modo alternativa → a letra/número aparece no badge (ex.: **`A`**, em verde) e no popup em fonte grande;
+   - modo aberto → o badge mostra **`✓`** e o **parágrafo** aparece no popup.
+4. Clique no ícone da extensão para abrir o **popup** com a resposta e o histórico das últimas respostas.
 
-O badge anterior é **sempre limpo** antes de processar uma nova questão.
+O badge anterior é **sempre limpo** antes de processar uma nova pergunta.
 
 ---
 
@@ -86,7 +93,8 @@ Para ver os logs do service worker (debug): em `edge://extensions/` → "Macaco 
 | Badge | Cor | Significado |
 |------|------|-------------|
 | `…` | cinza | Processando a requisição |
-| `A` / `3` | verde | Resposta válida (letra ou número) |
+| `A` / `3` | verde | Resposta de alternativa válida (letra ou número) |
+| `✓` | verde | Resposta aberta pronta — abra o **popup** para ler o parágrafo |
 | `!` | âmbar | API key ausente ou inválida (abre as opções) |
 | `?` | âmbar | Nenhum texto selecionado **ou** resposta em formato inesperado |
 | `X` | vermelho | Erro de API/rede ou **rate limit** (429) |
@@ -139,10 +147,10 @@ O briefing deu liberdade para mudar decisões técnicas, desde que documentadas.
 ### 1. "Thinking" do Gemini 2.5 desligado (mudança importante)
 Os modelos **Gemini 2.5 são "thinking models"**: eles gastam tokens *pensando* antes de produzir a resposta visível. Com o `maxOutputTokens: 10` sugerido no briefing, o modelo consumiria os 10 tokens **só no raciocínio interno** e devolveria **texto vazio** (`finishReason: MAX_TOKENS`). Solução adotada em `buildGenerationConfig()`:
 
-- **Flash / Flash-Lite:** `thinkingConfig.thinkingBudget = 0` (desliga o thinking) + `maxOutputTokens = 10`. Resposta curtíssima e determinística, exatamente como pedido.
-- **Pro:** o Pro **não permite** budget 0 (mínimo 128). Então usamos `thinkingBudget = 128` e `maxOutputTokens = 512` para reservar folga e não cair no `MAX_TOKENS`.
+- **Flash / Flash-Lite:** `thinkingConfig.thinkingBudget = 0` (desliga o thinking). `maxOutputTokens = 10` no modo alternativa; `256` no modo aberto (cabe ~1 parágrafo).
+- **Pro:** o Pro **não permite** budget 0 (mínimo 128). Então usamos `thinkingBudget = 128` e `maxOutputTokens = 512` (alternativa) / `768` (aberto) para reservar folga e não cair no `MAX_TOKENS`.
 
-Mantidos `temperature: 0.1` e o prompt exatamente como no briefing.
+`temperature` = `0.1` no modo alternativa (determinístico) e `0.2` no modo aberto. O prompt do modo alternativa é exatamente o do briefing.
 
 ### 2. API key enviada no header, não na URL
 A chamada usa o header `x-goog-api-key` em vez de `?key=...` na URL. Funciona igual e evita a key aparecer em logs de URL.
@@ -157,16 +165,27 @@ O briefing pedia popup ao clicar **e** "abrir options ao clicar" quando a key es
 - pelo botão **"Abrir configurações"** dentro do próprio popup.
 
 ### 5. Extras (dentro das liberdades do briefing)
+- **Dois modos** de resposta (alternativa / aberta) — ver item 6.
 - **Histórico** das últimas 10 respostas no popup.
 - **Atalho de teclado** (`commands` API) como alternativa ao botão direito.
 - **Botão "Testar conexão"** nas opções para validar a key na hora.
 - Suporte a **tema escuro** no popup e nas opções.
 - Modelo adicional `gemini-2.5-flash-lite` na lista.
 
+### 6. Modo de resposta aberta + impacto em tokens
+Além de múltipla escolha, a extensão responde **perguntas abertas** (segundo item do menu): resposta objetiva em até 1 parágrafo, exibida no popup.
+
+**Custo em tokens** (vs. modo alternativa):
+- **Entrada:** ~igual, às vezes **menor** — uma pergunta aberta costuma ser mais curta que uma questão com todas as alternativas.
+- **Saída:** **maior** — alternativa gera ~1 token (`A`); um parágrafo gera ~60–120 tokens.
+
+O `maxOutputTokens` (256 no Flash) **limita** o tamanho e, com isso, o custo — que continua irrisório no tier gratuito. Como o thinking fica **desligado** no Flash, não há tokens "escondidos" de raciocínio.
+
 ### Validação do fluxo (teste mental)
 - **Sem key → 1º uso:** `onInstalled` abre as opções. ✓
-- **Selecionar + botão direito:** `contextMenus.onClicked` → `info.selectionText` → `callGemini` → badge `A` + popup. ✓
-- **Atalho de teclado:** `commands.onCommand` → `scripting.executeScript` lê `window.getSelection()` → mesmo fluxo. ✓
+- **Modo alternativa:** `contextMenus.onClicked` (item "alternativa") → `info.selectionText` → `callGemini` → `normalizeAnswer` → badge `A` + popup. ✓
+- **Modo aberto:** item "resposta aberta" → prompt aberto + `maxOutputTokens` maior → texto no popup, badge `✓`. ✓
+- **Atalho de teclado:** `commands.onCommand` → `scripting.executeScript` lê `window.getSelection()` → modo alternativa. ✓
 - **Badge limpo:** `setBadgeText({text:""})` no início de cada `handleQuestion`. ✓
 - **Key inválida:** HTTP 400/403 com "API key" → badge `!` + abre opções. ✓
 - **Rate limit:** HTTP 429 → badge `X`. ✓
@@ -191,7 +210,8 @@ Os ícones em `icons/` (16/48/128 px) são uma carinha de macaco (marrom sobre f
 
 ## Melhorias futuras
 
-- Opção para também **mostrar uma justificativa curta** (modo "explicar") num segundo clique.
+- **Suporte a outras IAs** (OpenAI/GPT, Anthropic/Claude) via um adapter de provider.
+- **Detecção automática** do modo (alternativa vs. aberta) pelo formato do texto selecionado.
 - **Copiar a resposta** para a área de transferência automaticamente.
 - Permitir **editar o prompt** nas opções.
 - **Cache** de perguntas idênticas para economizar chamadas.

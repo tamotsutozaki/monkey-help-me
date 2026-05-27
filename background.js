@@ -1,9 +1,13 @@
 // background.js — service worker (Manifest V3)
 // Responsável por: menu de contexto, atalho de teclado, chamada da API Gemini e badge.
+// Dois modos:
+//   - "choice": questão de múltipla escolha → APENAS a letra/número, exibido no badge.
+//   - "open":   pergunta aberta → resposta objetiva em até 1 parágrafo, exibida no popup.
 // IMPORTANTE: nada de estado em memória entre eventos. O SW pode ser desligado a
 // qualquer momento pelo Edge/Chrome; tudo que precisa persistir vai pro chrome.storage.local.
 
-const MENU_ID = "answer-question";
+const MENU_CHOICE = "answer-choice";
+const MENU_OPEN = "answer-open";
 const DEFAULT_MODEL = "gemini-2.5-flash";
 const HISTORY_LIMIT = 10;
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -15,13 +19,20 @@ const COLORS = {
   err: "#dc2626"   // vermelho — rate limit ("X") ou erro de API/rede
 };
 
-const PROMPT_TEMPLATE = `Você é um assistente que responde questões de múltipla escolha.
+const PROMPT_CHOICE = `Você é um assistente que responde questões de múltipla escolha.
 Responda APENAS com a letra ou número da alternativa correta.
 Sem explicação, sem texto adicional, sem pontuação, sem aspas.
 Exemplos de resposta válida: A
 Outro exemplo válido: 3
 
 Questão:
+{{QUESTION}}`;
+
+const PROMPT_OPEN = `Você responde perguntas de forma objetiva e direta, em português.
+Responda em NO MÁXIMO um parágrafo, indo direto ao ponto.
+Não repita a pergunta, não faça introdução, não use rodeios.
+
+Pergunta:
 {{QUESTION}}`;
 
 // ---------------------------------------------------------------------------
@@ -35,8 +46,13 @@ chrome.runtime.onInstalled.addListener(async () => {
     console.warn("[Macaco] removeAll falhou (ok ignorar):", e);
   }
   chrome.contextMenus.create({
-    id: MENU_ID,
-    title: "Responder questão",
+    id: MENU_CHOICE,
+    title: "Responder alternativa (letra/número)",
+    contexts: ["selection"]
+  });
+  chrome.contextMenus.create({
+    id: MENU_OPEN,
+    title: "Explicar / resposta aberta",
     contexts: ["selection"]
   });
 
@@ -47,25 +63,28 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
-chrome.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === MENU_ID) {
-    handleQuestion(info.selectionText, tab);
+chrome.contextMenus.onClicked.addListener((info, _tab) => {
+  if (info.menuItemId === MENU_CHOICE) {
+    handleQuestion(info.selectionText, "choice");
+  } else if (info.menuItemId === MENU_OPEN) {
+    handleQuestion(info.selectionText, "open");
   }
 });
 
+// Atalho de teclado responde sempre no modo "alternativa" (badge curto).
 chrome.commands.onCommand.addListener(async (command) => {
   if (command !== "answer-selection") return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) return;
   const text = await getSelectionFromTab(tab.id);
-  handleQuestion(text, tab);
+  handleQuestion(text, "choice");
 });
 
 // ---------------------------------------------------------------------------
 // Núcleo
 // ---------------------------------------------------------------------------
 
-async function handleQuestion(selectionText, _tab) {
+async function handleQuestion(selectionText, mode) {
   // Regra do briefing: limpar SEMPRE o badge anterior antes de processar o novo.
   await chrome.action.setBadgeText({ text: "" });
 
@@ -74,7 +93,7 @@ async function handleQuestion(selectionText, _tab) {
     await report("?", COLORS.warn, {
       type: "error",
       value: "?",
-      message: "Nenhum texto selecionado. Selecione a questão (com as alternativas) antes de acionar."
+      message: "Nenhum texto selecionado. Selecione a pergunta/questão antes de acionar."
     });
     return;
   }
@@ -96,23 +115,31 @@ async function handleQuestion(selectionText, _tab) {
   await setBadge("…", COLORS.busy);
 
   try {
-    const raw = await callGemini(apiKey, useModel, text);
-    const answer = normalizeAnswer(raw);
+    const prompt = buildPrompt(mode, text);
+    const generationConfig = buildGenerationConfig(useModel, mode);
+    const raw = await callGemini(apiKey, useModel, prompt, generationConfig);
 
+    if (mode === "open") {
+      const answer = raw.trim();
+      console.log(`[Macaco] Resposta aberta (${useModel}):`, answer.slice(0, 120));
+      await setBadge("✓", COLORS.ok); // badge não cabe parágrafo → indicador; texto no popup
+      await saveResult({ type: "open", value: answer, question: text });
+      return;
+    }
+
+    // modo "choice"
+    const answer = normalizeAnswer(raw);
     if (answer) {
       console.log(`[Macaco] Resposta: "${answer}" (modelo ${useModel})`);
-      await report(answer, COLORS.ok, {
-        type: "answer",
-        value: answer,
-        raw,
-        question: text
-      });
+      await setBadge(answer, COLORS.ok);
+      await saveResult({ type: "answer", value: answer, raw, question: text });
     } else {
       console.warn(`[Macaco] Formato inesperado da API:`, raw);
-      await report("?", COLORS.warn, {
+      await setBadge("?", COLORS.warn);
+      await saveResult({
         type: "error",
         value: "?",
-        message: "A API respondeu, mas não num formato de letra/número curto.",
+        message: "A API respondeu, mas não num formato de letra/número curto. Tente o modo \"resposta aberta\".",
         raw,
         question: text
       });
@@ -132,11 +159,11 @@ async function handleQuestion(selectionText, _tab) {
   }
 }
 
-async function callGemini(apiKey, model, questionText) {
+async function callGemini(apiKey, model, prompt, generationConfig) {
   const url = `${API_BASE}/${encodeURIComponent(model)}:generateContent`;
   const body = {
-    contents: [{ parts: [{ text: PROMPT_TEMPLATE.replace("{{QUESTION}}", questionText) }] }],
-    generationConfig: buildGenerationConfig(model)
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig
   };
 
   const res = await fetch(url, {
@@ -187,19 +214,29 @@ async function callGemini(apiKey, model, questionText) {
   return textOut;
 }
 
+function buildPrompt(mode, question) {
+  const template = mode === "open" ? PROMPT_OPEN : PROMPT_CHOICE;
+  return template.replace("{{QUESTION}}", question);
+}
+
 // Gemini 2.5 são modelos "thinking": gastam tokens pensando ANTES de responder.
 // Com maxOutputTokens baixo isso zera a resposta visível. Por isso:
-//  - Flash/Flash-Lite: desligamos o thinking (budget 0) → cabe em 10 tokens.
+//  - Flash/Flash-Lite: desligamos o thinking (budget 0).
 //  - Pro: não permite budget 0 (mínimo 128) → reservamos folga no maxOutputTokens.
-function buildGenerationConfig(model) {
+// O modo "open" precisa de mais tokens de saída (cabe ~1 parágrafo); "choice" usa pouquíssimos.
+function buildGenerationConfig(model, mode) {
   const m = (model || "").toLowerCase();
-  const cfg = { temperature: 0.1 };
-  if (m.includes("flash") || m.includes("lite")) {
+  const isFlash = m.includes("flash") || m.includes("lite");
+  const isOpen = mode === "open";
+
+  const cfg = { temperature: isOpen ? 0.2 : 0.1 };
+
+  if (isFlash) {
     cfg.thinkingConfig = { thinkingBudget: 0 };
-    cfg.maxOutputTokens = 10;
+    cfg.maxOutputTokens = isOpen ? 256 : 10;
   } else {
     cfg.thinkingConfig = { thinkingBudget: 128 };
-    cfg.maxOutputTokens = 512;
+    cfg.maxOutputTokens = isOpen ? 768 : 512;
   }
   return cfg;
 }
@@ -244,17 +281,21 @@ async function saveResult(result) {
   result.ts = Date.now();
   const { history } = await chrome.storage.local.get("history");
   const list = Array.isArray(history) ? history : [];
+
   if (result.type === "answer") {
-    list.unshift({
-      value: result.value,
-      ts: result.ts,
-      snippet: (result.question || "").replace(/\s+/g, " ").slice(0, 80)
-    });
+    list.unshift({ kind: "choice", value: result.value, ts: result.ts, snippet: clip(result.question) });
+  } else if (result.type === "open") {
+    list.unshift({ kind: "open", value: "✓", ts: result.ts, snippet: clip(result.question), answer: result.value });
   }
+
   await chrome.storage.local.set({
     lastResult: result,
     history: list.slice(0, HISTORY_LIMIT)
   });
+}
+
+function clip(s) {
+  return (s || "").replace(/\s+/g, " ").slice(0, 80);
 }
 
 // Lê a seleção da aba ativa (usado só pelo atalho de teclado; o menu de contexto
