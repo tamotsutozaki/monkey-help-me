@@ -4,11 +4,15 @@
 //   - "choice": múltipla escolha → a IA mapeia as alternativas para letras (A, B, C...)
 //     por posição e devolve a(s) correta(s) em JSON; letra(s) no badge, letra+texto no popup.
 //   - "open":   pergunta aberta → resposta objetiva em até 1 parágrafo, exibida no popup.
+//   - "image":  recorte da tela (Ctrl+Shift+3) → captura a aba, corta o retângulo e
+//     manda a imagem ao Gemini (visão); responde como "choice". Útil quando o texto
+//     não é selecionável (dentro de botões, canvas, etc.).
 // IMPORTANTE: nada de estado em memória entre eventos. O SW pode ser desligado a
 // qualquer momento pelo Edge/Chrome; tudo que precisa persistir vai pro chrome.storage.local.
 
 const MENU_CHOICE = "answer-choice";
 const MENU_OPEN = "answer-open";
+const MENU_IMAGE = "answer-image";
 const DEFAULT_MODEL = "gemini-2.5-flash";
 const HISTORY_LIMIT = 10;
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
@@ -43,6 +47,14 @@ Não repita a pergunta, não faça introdução, não use rodeios.
 Pergunta:
 {{QUESTION}}`;
 
+const PROMPT_IMAGE = `A imagem contém uma questão de múltipla escolha. Leia com atenção a pergunta e as alternativas mostradas na imagem.
+
+As alternativas estão em ordem; atribua letras de cima para baixo: A = 1ª alternativa, B = 2ª, e assim por diante. Identifique TODAS as alternativas corretas (normalmente uma, mas pode haver mais).
+
+Responda SOMENTE com um objeto JSON, sem nenhum texto fora dele:
+{"letras": ["<letra>", "..."], "texto": "<texto exato da(s) alternativa(s) correta(s)>"}
+Se houver mais de uma correta, liste as letras e separe os textos com " ; ".`;
+
 // ---------------------------------------------------------------------------
 // Registro de listeners no topo (obrigatório em MV3 para o SW acordar nos eventos)
 // ---------------------------------------------------------------------------
@@ -63,6 +75,11 @@ chrome.runtime.onInstalled.addListener(async () => {
     title: "Explicar / resposta aberta",
     contexts: ["selection"]
   });
+  chrome.contextMenus.create({
+    id: MENU_IMAGE,
+    title: "Responder questão da imagem (recorte)",
+    contexts: ["page", "selection", "image"]
+  });
 
   // Primeiro uso sem API key configurada → abre as opções automaticamente.
   const { apiKey } = await chrome.storage.local.get("apiKey");
@@ -71,22 +88,30 @@ chrome.runtime.onInstalled.addListener(async () => {
   }
 });
 
-chrome.contextMenus.onClicked.addListener((info, _tab) => {
+chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId === MENU_CHOICE) {
     handleQuestion(info.selectionText, "choice");
   } else if (info.menuItemId === MENU_OPEN) {
     handleQuestion(info.selectionText, "open");
+  } else if (info.menuItemId === MENU_IMAGE) {
+    startImageCapture(tab);
   }
 });
 
-// Atalhos de teclado: Ctrl+Shift+1 → alternativa, Ctrl+Shift+2 → resposta aberta.
+// Atalhos: Ctrl+Shift+1 → alternativa, Ctrl+Shift+2 → aberta, Ctrl+Shift+3 → recorte de imagem.
 chrome.commands.onCommand.addListener(async (command) => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) return;
+
+  if (command === "answer-image-selection") {
+    startImageCapture(tab);
+    return;
+  }
+
   const mode =
     command === "answer-open-selection" ? "open" :
     command === "answer-selection" ? "choice" : null;
   if (!mode) return;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) return;
   const text = await getSelectionFromTab(tab.id);
   handleQuestion(text, mode);
 });
@@ -128,7 +153,7 @@ async function handleQuestion(selectionText, mode) {
   try {
     const prompt = buildPrompt(mode, text);
     const generationConfig = buildGenerationConfig(useModel, mode);
-    const raw = await callGemini(apiKey, useModel, prompt, generationConfig);
+    const raw = await callGemini(apiKey, useModel, [{ text: prompt }], generationConfig);
 
     if (mode === "open") {
       const answer = raw.trim();
@@ -173,10 +198,10 @@ async function handleQuestion(selectionText, mode) {
   }
 }
 
-async function callGemini(apiKey, model, prompt, generationConfig) {
+async function callGemini(apiKey, model, parts, generationConfig) {
   const url = `${API_BASE}/${encodeURIComponent(model)}:generateContent`;
   const body = {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [{ parts }],
     generationConfig
   };
 
@@ -212,8 +237,8 @@ async function callGemini(apiKey, model, prompt, generationConfig) {
 
   const data = await res.json();
   const cand = data?.candidates?.[0];
-  const parts = cand?.content?.parts || [];
-  const textOut = parts.map((p) => p.text || "").join("").trim();
+  const respParts = cand?.content?.parts || [];
+  const textOut = respParts.map((p) => p.text || "").join("").trim();
 
   if (!textOut) {
     const finish = cand?.finishReason;
@@ -339,4 +364,178 @@ async function getSelectionFromTab(tabId) {
     console.error("[Macaco] Falha ao ler a seleção da aba:", e);
     return "";
   }
+}
+
+// ---------------------------------------------------------------------------
+// Modo imagem: recorte da tela → Gemini (visão)
+// ---------------------------------------------------------------------------
+
+async function startImageCapture(tab) {
+  await chrome.action.setBadgeText({ text: "" });
+  if (!tab || !tab.id) return;
+
+  const { apiKey, model } = await chrome.storage.local.get(["apiKey", "model"]);
+  const useModel = model || DEFAULT_MODEL;
+  if (!apiKey) {
+    await report("!", COLORS.warn, {
+      type: "error",
+      value: "!",
+      message: "API key não configurada. Abra as opções e cole sua key do Gemini."
+    });
+    chrome.runtime.openOptionsPage();
+    return;
+  }
+
+  // 1) injeta o overlay para o usuário arrastar um retângulo na página
+  let rect;
+  try {
+    const [inj] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: dragSelectOverlay
+    });
+    rect = inj?.result;
+  } catch (e) {
+    console.error("[Macaco] Não consegui abrir a seleção:", e);
+    await report("X", COLORS.err, {
+      type: "error",
+      value: "X",
+      message: "Não consegui abrir a seleção nesta página. Páginas restritas (edge://, Web Store, PDF) não permitem captura."
+    });
+    return;
+  }
+  if (!rect) {
+    console.log("[Macaco] Captura cancelada.");
+    return; // Esc ou recorte minúsculo
+  }
+
+  await setBadge("…", COLORS.busy);
+
+  try {
+    // 2) print da área visível (o overlay já foi removido antes de resolver)
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+    // 3) corta no retângulo selecionado
+    const base64 = await cropDataUrl(dataUrl, rect);
+    // 4) manda imagem + prompt JSON para o Gemini (visão)
+    const parts = [
+      { text: PROMPT_IMAGE },
+      { inlineData: { mimeType: "image/png", data: base64 } }
+    ];
+    const raw = await callGemini(apiKey, useModel, parts, buildGenerationConfig(useModel, "choice"));
+
+    const { letters, detail } = parseChoice(raw);
+    if (letters.length) {
+      const display = letters.join(", ");
+      const compact = letters.join("");
+      console.log(`[Macaco] (imagem) Alternativa(s): ${display} (modelo ${useModel})`);
+      await setBadge(compact.length <= 4 ? compact : "✓", COLORS.ok);
+      await saveResult({ type: "answer", value: display, detail, raw, question: "(recorte de imagem)" });
+    } else {
+      console.warn("[Macaco] (imagem) Resposta não interpretável:", raw);
+      await setBadge("?", COLORS.warn);
+      await saveResult({
+        type: "error",
+        value: "?",
+        message: "Não consegui interpretar a resposta da imagem. Recorte só a questão + alternativas e tente de novo.",
+        raw,
+        question: "(recorte de imagem)"
+      });
+    }
+  } catch (err) {
+    console.error("[Macaco] Erro na captura/IA:", err);
+    const isKey = err.kind === "key";
+    await report(isKey ? "!" : "X", isKey ? COLORS.warn : COLORS.err, {
+      type: "error",
+      value: isKey ? "!" : "X",
+      message: err.message || "Erro desconhecido.",
+      question: "(recorte de imagem)"
+    });
+    if (isKey) chrome.runtime.openOptionsPage();
+  }
+}
+
+// Injetada na PÁGINA: o usuário arrasta um retângulo; resolve {x,y,w,h,dpr} em px CSS.
+// Remove o overlay ANTES de resolver (e espera 2 frames) para ele não aparecer no print.
+function dragSelectOverlay() {
+  return new Promise((resolve) => {
+    const dpr = window.devicePixelRatio || 1;
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;cursor:crosshair;background:rgba(0,0,0,0.12);";
+    const box = document.createElement("div");
+    box.style.cssText = "position:fixed;border:2px solid #16a34a;background:rgba(22,163,74,0.15);display:none;pointer-events:none;z-index:2147483647;";
+    const hint = document.createElement("div");
+    hint.textContent = "Arraste para recortar a questão · Esc cancela";
+    hint.style.cssText = "position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2147483647;background:#111;color:#fff;font:13px system-ui,sans-serif;padding:6px 12px;border-radius:8px;pointer-events:none;";
+    document.body.appendChild(overlay);
+    document.body.appendChild(box);
+    document.body.appendChild(hint);
+
+    let sx = 0, sy = 0, dragging = false;
+
+    function cleanup() {
+      overlay.remove();
+      box.remove();
+      hint.remove();
+      window.removeEventListener("keydown", onKey, true);
+    }
+    function finish(rect) {
+      cleanup();
+      // 2 frames para garantir que o overlay sumiu do frame antes do print
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(rect)));
+    }
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); finish(null); }
+    }
+
+    overlay.addEventListener("mousedown", (e) => {
+      dragging = true;
+      sx = e.clientX; sy = e.clientY;
+      box.style.left = sx + "px";
+      box.style.top = sy + "px";
+      box.style.width = "0px";
+      box.style.height = "0px";
+      box.style.display = "block";
+    });
+    overlay.addEventListener("mousemove", (e) => {
+      if (!dragging) return;
+      box.style.left = Math.min(sx, e.clientX) + "px";
+      box.style.top = Math.min(sy, e.clientY) + "px";
+      box.style.width = Math.abs(e.clientX - sx) + "px";
+      box.style.height = Math.abs(e.clientY - sy) + "px";
+    });
+    overlay.addEventListener("mouseup", (e) => {
+      if (!dragging) return;
+      dragging = false;
+      const x = Math.min(sx, e.clientX), y = Math.min(sy, e.clientY);
+      const w = Math.abs(e.clientX - sx), h = Math.abs(e.clientY - sy);
+      if (w < 6 || h < 6) { finish(null); return; }
+      finish({ x, y, w, h, dpr });
+    });
+    window.addEventListener("keydown", onKey, true);
+  });
+}
+
+// Corta o dataURL (PNG do print) no retângulo (px CSS × dpr) e devolve base64 (sem prefixo).
+async function cropDataUrl(dataUrl, rect) {
+  const blob = await (await fetch(dataUrl)).blob();
+  const bitmap = await createImageBitmap(blob);
+  const sx = Math.max(0, Math.round(rect.x * rect.dpr));
+  const sy = Math.max(0, Math.round(rect.y * rect.dpr));
+  const sw = Math.max(1, Math.round(rect.w * rect.dpr));
+  const sh = Math.max(1, Math.round(rect.h * rect.dpr));
+  const canvas = new OffscreenCanvas(sw, sh);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
+  bitmap.close();
+  const outBlob = await canvas.convertToBlob({ type: "image/png" });
+  return arrayBufferToBase64(await outBlob.arrayBuffer());
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }

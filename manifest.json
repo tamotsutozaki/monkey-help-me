@@ -42,6 +42,12 @@
         "default": "Ctrl+Shift+2"
       },
       "description": "Explicar / resposta aberta"
+    },
+    "answer-image-selection": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+3"
+      },
+      "description": "Responder questão da imagem (recorte da tela)"
     }
   }
 }

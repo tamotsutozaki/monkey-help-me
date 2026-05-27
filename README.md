@@ -1,11 +1,12 @@
 # Macaco Ajuda
 
-Extensão de navegador (Microsoft Edge / Chromium — **Manifest V3**) que responde **questões de múltipla escolha** e **perguntas abertas** selecionadas em qualquer página, usando a **API do Google Gemini**.
+Extensão de navegador (Microsoft Edge / Chromium — **Manifest V3**) que responde **questões de múltipla escolha** e **perguntas abertas** em qualquer página, usando a **API do Google Gemini**. Também resolve questões por **recorte da tela** — útil quando o texto não dá para selecionar.
 
-Fluxo: você seleciona o texto → botão direito → escolhe um dos dois itens:
+Fluxo: você seleciona o texto → botão direito → escolhe um dos itens (ou usa os atalhos):
 
 - **"Responder alternativa"** → a IA mapeia as alternativas para letras (A, B, C... por posição) e devolve a(s) correta(s). Letra(s) no **badge sobre o ícone** (ex.: `B`, `ACDF`) e **letra + texto** no popup. Suporta mais de uma correta.
 - **"Explicar / resposta aberta"** → resposta objetiva em **até 1 parágrafo** no **popup** (o badge mostra `✓`).
+- **"Responder questão da imagem (recorte)"** → você arrasta um retângulo na tela; o recorte vai para a IA (visão) e ela responde como alternativa. Para questões cujo texto **não dá para selecionar**.
 
 ---
 
@@ -29,11 +30,12 @@ Fluxo: você seleciona o texto → botão direito → escolhe um dos dois itens:
 ## Como funciona
 
 - **Service worker** (`background.js`) cria os itens de menu de contexto, recebe o texto selecionado, chama a API do Gemini e escreve o resultado.
-- **Dois modos**, escolhidos pelo item do menu de botão direito:
+- **Três modos**, escolhidos pelo item do menu de botão direito (ou atalho):
   - **Alternativa** (`choice`): a IA numera as alternativas como letras (A = 1ª, B = 2ª...) **por posição**, raciocina (thinking) e devolve a(s) correta(s) em **JSON** (`{"letras":[...],"texto":"..."}`). Funciona com alternativas de texto longo e com **mais de uma** correta. Badge mostra a(s) letra(s) (5+ viram `✓`); popup mostra **letra + texto**.
   - **Resposta aberta** (`open`): prompt pede resposta direta em até 1 parágrafo → texto no **popup** (o badge vira `✓`, pois não cabe parágrafo).
+  - **Imagem / recorte** (`image`): `chrome.tabs.captureVisibleTab` tira print da aba, você arrasta um retângulo (overlay), o recorte é cortado (`OffscreenCanvas`, com `devicePixelRatio`) e enviado ao Gemini (visão). Responde como alternativa (letras). Para texto **não selecionável**.
 - O **popup** (clique no ícone) também mostra um **histórico** das últimas respostas.
-- **Atalhos de teclado** (padrão): `Ctrl+Shift+1` → modo alternativa, `Ctrl+Shift+2` → modo aberto. Configuráveis em `edge://extensions/shortcuts`.
+- **Atalhos de teclado** (padrão): `Ctrl+Shift+1` → alternativa, `Ctrl+Shift+2` → aberto, `Ctrl+Shift+3` → recorte de imagem. Configuráveis em `edge://extensions/shortcuts`.
 - A API key e o modelo escolhido ficam em `chrome.storage.local` — **nunca** no código.
 
 ---
@@ -67,9 +69,11 @@ Na primeira instalação, como ainda não há API key, a **página de opções a
 2. **Botão direito** e escolha o modo:
    - **"Responder alternativa"** — para múltipla escolha. Selecione a questão **incluindo todas as alternativas**. *(atalho: `Ctrl+Shift+1`.)*
    - **"Explicar / resposta aberta"** — para perguntas abertas/teóricas. Ex.: *"O que é um algoritmo?"*, *"Escreva um exemplo de senha forte"*, *"Em que ano o HTML lançou sua primeira versão?"*. *(atalho: `Ctrl+Shift+2`.)*
+   - **"Responder questão da imagem (recorte)"** — quando o texto **não** é selecionável. Arraste o retângulo sobre a questão + alternativas. *(atalho: `Ctrl+Shift+3`; `Esc` cancela.)*
 3. Enquanto processa, o badge mostra **`…`**. Depois:
    - modo alternativa → a(s) letra(s) aparece(m) no badge (ex.: **`B`** ou **`ACDF`**, em verde) e a letra + texto no popup;
-   - modo aberto → o badge mostra **`✓`** e o **parágrafo** aparece no popup.
+   - modo aberto → o badge mostra **`✓`** e o **parágrafo** aparece no popup;
+   - modo imagem → você arrasta o retângulo; depois a(s) letra(s) aparece(m) no badge e letra + texto no popup.
 4. Clique no ícone da extensão para abrir o **popup** com a resposta e o histórico das últimas respostas.
 
 O badge anterior é **sempre limpo** antes de processar uma nova pergunta.
@@ -121,11 +125,16 @@ O motivo detalhado de qualquer estado de erro aparece no **popup** (clique no í
 **Badge `?` (não consegui interpretar a resposta)**
 - A IA não devolveu um JSON válido com as letras. Veja o texto cru no popup/console. Tente de novo, use o modo **"Explicar / resposta aberta"** (`Ctrl+Shift+2`) ou troque o modelo nas opções.
 
+**O recorte de imagem (`Ctrl+Shift+3`) não funciona**
+- Páginas restritas (`edge://`, Web Store, visualizador de PDF) **não** permitem captura — abra a questão numa página normal.
+- O overlay mostra "Arraste para recortar"; `Esc` cancela. Recorte um pouco **maior** que a questão para não cortar alternativas.
+- Se sair desalinhado, costuma ser zoom/escala da tela; o crop já considera o `devicePixelRatio`, mas recortar com folga ajuda.
+
 **Erro de CORS / falha de rede**
 - O domínio `https://generativelanguage.googleapis.com/*` já está declarado em `host_permissions`. Se aparecer erro de rede, verifique sua conexão e se a key é válida.
 
-**Os atalhos `Ctrl+Shift+1` / `Ctrl+Shift+2` não funcionam**
-- Pode haver conflito com outro atalho do sistema/navegador. Vá em `edge://extensions/shortcuts` e defina combinações livres para "Responder alternativa (letra/número)" e "Explicar / resposta aberta".
+**Os atalhos `Ctrl+Shift+1` / `Ctrl+Shift+2` / `Ctrl+Shift+3` não funcionam**
+- Pode haver conflito com outro atalho do sistema/navegador. Vá em `edge://extensions/shortcuts` e defina combinações livres para os três comandos da "Macaco Ajuda".
 - Combos já usados pelo Edge (evite): `Ctrl+Shift+Y` (Coleções), `Ctrl+Shift+U` (Ler em voz alta), `Ctrl+Shift+K` (duplicar aba), `Ctrl+Shift+E` (busca na barra lateral).
 
 ---
@@ -167,7 +176,7 @@ O briefing pedia popup ao clicar **e** "abrir options ao clicar" quando a key es
 - pelo botão **"Abrir configurações"** dentro do próprio popup.
 
 ### 5. Extras (dentro das liberdades do briefing)
-- **Dois modos** de resposta (alternativa / aberta) — ver item 6.
+- **Três modos** de resposta (alternativa / aberta / imagem) — ver itens 6 e 7.
 - **Histórico** das últimas 10 respostas no popup.
 - **Atalho de teclado** (`commands` API) como alternativa ao botão direito.
 - **Botão "Testar conexão"** nas opções para validar a key na hora.
@@ -179,11 +188,21 @@ Além de múltipla escolha, a extensão responde **perguntas abertas** (segundo 
 
 **Custo em tokens:** com o thinking dinâmico ligado, cada requisição inclui os tokens de raciocínio (cobrados como **saída**). Em questão simples o thinking é curto; em difícil, maior. No **modo alternativa** a saída visível é minúscula (só o JSON), mas o thinking entra na conta; no **modo aberto** soma-se o parágrafo. No Flash o custo por requisição segue na casa de frações de centavo de dólar. Para cortar custo depois, basta limitar o `thinkingBudget`.
 
+### 7. Modo imagem (recorte da tela → visão)
+Algumas telas têm o texto dentro de botões/canvas e não dá para selecionar. Por isso o modo **imagem** (`Ctrl+Shift+3` ou item do menu):
+- `chrome.tabs.captureVisibleTab` tira um print da área visível da aba (coberto pela permissão `activeTab`, sem prompt novo).
+- Um overlay injetado deixa você **arrastar um retângulo**; ele é removido **antes** do print (espera 2 frames) para não aparecer na imagem.
+- O recorte é cortado com `OffscreenCanvas` no service worker, multiplicando pelo `devicePixelRatio` (print em px físicos, retângulo em px CSS).
+- A imagem (PNG base64) vai como `inlineData` junto do mesmo prompt JSON → resposta em letras, igual ao modo alternativa (`parseChoice`).
+
+Limitações: captura só a área **visível** da página ativa; páginas `edge://`/Web Store/PDF não permitem; a imagem consome mais tokens de entrada (~258+), ainda barato.
+
 ### Validação do fluxo (teste mental)
 - **Sem key → 1º uso:** `onInstalled` abre as opções. ✓
 - **Modo alternativa:** `contextMenus.onClicked` → `callGemini` (JSON) → `parseChoice` extrai letras + texto → badge com a(s) letra(s) + popup (letra + texto). ✓
 - **Modo aberto:** item "resposta aberta" → prompt aberto → texto no popup, badge `✓`. ✓
-- **Atalhos de teclado:** `commands.onCommand` roteia `Ctrl+Shift+1` → alternativa e `Ctrl+Shift+2` → aberto; lê a seleção via `scripting.executeScript`. ✓
+- **Atalhos de teclado:** `commands.onCommand` roteia `Ctrl+Shift+1` → alternativa, `Ctrl+Shift+2` → aberto e `Ctrl+Shift+3` → recorte de imagem. ✓
+- **Modo imagem:** overlay arrasta retângulo → `captureVisibleTab` + crop (`OffscreenCanvas`, com DPR) → `inlineData` ao Gemini → `parseChoice` → badge com letras. ✓
 - **Badge limpo:** `setBadgeText({text:""})` no início de cada `handleQuestion`. ✓
 - **Key inválida:** HTTP 400/403 com "API key" → badge `!` + abre opções. ✓
 - **Rate limit:** HTTP 429 → badge `X`. ✓
@@ -201,7 +220,7 @@ Os ícones em `icons/` (16/48/128 px) são uma carinha de macaco (marrom sobre f
 ## Privacidade e segurança
 
 - A **API key** vive só no `chrome.storage.local` do seu navegador.
-- O texto selecionado é enviado **apenas** para `generativelanguage.googleapis.com` (Google), para obter a resposta.
+- O texto selecionado — ou o **recorte de imagem** (modo imagem) — é enviado **apenas** para `generativelanguage.googleapis.com` (Google), para obter a resposta.
 - O `.gitignore` previne commit acidental de arquivos de segredo. **Não** adicione a key a nenhum arquivo do projeto.
 
 ---
