@@ -33,7 +33,7 @@ Fluxo: você seleciona o texto → botão direito → escolhe um dos dois itens:
   - **Alternativa** (`choice`): prompt força só a letra/número, `maxOutputTokens` baixo → resposta no **badge** (forma primária) e no popup em fonte grande.
   - **Resposta aberta** (`open`): prompt pede resposta direta em até 1 parágrafo, `maxOutputTokens` maior → texto no **popup** (o badge vira `✓`, pois não cabe parágrafo).
 - O **popup** (clique no ícone) também mostra um **histórico** das últimas respostas.
-- Também há um **atalho de teclado** (`Ctrl+Shift+Y` por padrão) que dispara o modo **alternativa**.
+- **Atalhos de teclado** (padrão): `Ctrl+Shift+1` → modo alternativa, `Ctrl+Shift+2` → modo aberto. Configuráveis em `edge://extensions/shortcuts`.
 - A API key e o modelo escolhido ficam em `chrome.storage.local` — **nunca** no código.
 
 ---
@@ -65,8 +65,8 @@ Na primeira instalação, como ainda não há API key, a **página de opções a
 
 1. Em qualquer página, **selecione com o mouse** o texto.
 2. **Botão direito** e escolha o modo:
-   - **"Responder alternativa (letra/número)"** — para múltipla escolha. Selecione a questão **incluindo as alternativas**. *(ou pressione `Ctrl+Shift+Y`.)*
-   - **"Explicar / resposta aberta"** — para perguntas abertas/teóricas. Ex.: *"O que é um algoritmo?"*, *"Escreva um exemplo de senha forte"*, *"Em que ano o HTML lançou sua primeira versão?"*.
+   - **"Responder alternativa (letra/número)"** — para múltipla escolha. Selecione a questão **incluindo as alternativas**. *(atalho: `Ctrl+Shift+1`.)*
+   - **"Explicar / resposta aberta"** — para perguntas abertas/teóricas. Ex.: *"O que é um algoritmo?"*, *"Escreva um exemplo de senha forte"*, *"Em que ano o HTML lançou sua primeira versão?"*. *(atalho: `Ctrl+Shift+2`.)*
 3. Enquanto processa, o badge mostra **`…`**. Depois:
    - modo alternativa → a letra/número aparece no badge (ex.: **`A`**, em verde) e no popup em fonte grande;
    - modo aberto → o badge mostra **`✓`** e o **parágrafo** aparece no popup.
@@ -124,8 +124,9 @@ O motivo detalhado de qualquer estado de erro aparece no **popup** (clique no í
 **Erro de CORS / falha de rede**
 - O domínio `https://generativelanguage.googleapis.com/*` já está declarado em `host_permissions`. Se aparecer erro de rede, verifique sua conexão e se a key é válida.
 
-**O atalho `Ctrl+Shift+Y` não funciona**
-- Pode haver conflito com outro atalho. Vá em `edge://extensions/shortcuts` e defina uma combinação livre para "Responder a questão selecionada".
+**Os atalhos `Ctrl+Shift+1` / `Ctrl+Shift+2` não funcionam**
+- Pode haver conflito com outro atalho do sistema/navegador. Vá em `edge://extensions/shortcuts` e defina combinações livres para "Responder alternativa (letra/número)" e "Explicar / resposta aberta".
+- Combos já usados pelo Edge (evite): `Ctrl+Shift+Y` (Coleções), `Ctrl+Shift+U` (Ler em voz alta), `Ctrl+Shift+K` (duplicar aba), `Ctrl+Shift+E` (busca na barra lateral).
 
 ---
 
@@ -185,7 +186,7 @@ O `maxOutputTokens` (256 no Flash) **limita** o tamanho e, com isso, o custo —
 - **Sem key → 1º uso:** `onInstalled` abre as opções. ✓
 - **Modo alternativa:** `contextMenus.onClicked` (item "alternativa") → `info.selectionText` → `callGemini` → `normalizeAnswer` → badge `A` + popup. ✓
 - **Modo aberto:** item "resposta aberta" → prompt aberto + `maxOutputTokens` maior → texto no popup, badge `✓`. ✓
-- **Atalho de teclado:** `commands.onCommand` → `scripting.executeScript` lê `window.getSelection()` → modo alternativa. ✓
+- **Atalhos de teclado:** `commands.onCommand` roteia `Ctrl+Shift+1` → alternativa e `Ctrl+Shift+2` → aberto; lê a seleção via `scripting.executeScript`. ✓
 - **Badge limpo:** `setBadgeText({text:""})` no início de cada `handleQuestion`. ✓
 - **Key inválida:** HTTP 400/403 com "API key" → badge `!` + abre opções. ✓
 - **Rate limit:** HTTP 429 → badge `X`. ✓

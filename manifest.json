@@ -33,9 +33,15 @@
   "commands": {
     "answer-selection": {
       "suggested_key": {
-        "default": "Ctrl+Shift+Y"
+        "default": "Ctrl+Shift+1"
       },
-      "description": "Responder a questão selecionada"
+      "description": "Responder alternativa (letra/número)"
+    },
+    "answer-open-selection": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+2"
+      },
+      "description": "Explicar / resposta aberta"
     }
   }
 }

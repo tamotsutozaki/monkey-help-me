@@ -71,13 +71,16 @@ chrome.contextMenus.onClicked.addListener((info, _tab) => {
   }
 });
 
-// Atalho de teclado responde sempre no modo "alternativa" (badge curto).
+// Atalhos de teclado: Ctrl+Shift+1 → alternativa, Ctrl+Shift+2 → resposta aberta.
 chrome.commands.onCommand.addListener(async (command) => {
-  if (command !== "answer-selection") return;
+  const mode =
+    command === "answer-open-selection" ? "open" :
+    command === "answer-selection" ? "choice" : null;
+  if (!mode) return;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) return;
   const text = await getSelectionFromTab(tab.id);
-  handleQuestion(text, "choice");
+  handleQuestion(text, mode);
 });
 
 // ---------------------------------------------------------------------------
