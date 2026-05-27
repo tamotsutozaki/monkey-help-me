@@ -1,7 +1,8 @@
 // background.js — service worker (Manifest V3)
 // Responsável por: menu de contexto, atalho de teclado, chamada da API Gemini e badge.
 // Dois modos:
-//   - "choice": questão de múltipla escolha → APENAS a letra/número, exibido no badge.
+//   - "choice": múltipla escolha → a IA mapeia as alternativas para letras (A, B, C...)
+//     por posição e devolve a(s) correta(s) em JSON; letra(s) no badge, letra+texto no popup.
 //   - "open":   pergunta aberta → resposta objetiva em até 1 parágrafo, exibida no popup.
 // IMPORTANTE: nada de estado em memória entre eventos. O SW pode ser desligado a
 // qualquer momento pelo Edge/Chrome; tudo que precisa persistir vai pro chrome.storage.local.
@@ -19,10 +20,18 @@ const COLORS = {
   err: "#dc2626"   // vermelho — rate limit ("X") ou erro de API/rede
 };
 
-const PROMPT_CHOICE = `Você responde questões de múltipla escolha. Responda de forma CURTA, sem explicação e sem pontuação:
-- Se as alternativas tiverem rótulo (letra A, B, C... ou número), responda APENAS com esse rótulo.
-- Se as alternativas NÃO tiverem rótulo, responda APENAS com o texto exato da alternativa correta.
-Não escreva mais nada.
+const PROMPT_CHOICE = `Você recebe uma questão de múltipla escolha. Pense com calma e analise cada alternativa.
+
+As alternativas estão listadas em ordem; atribua letras de cima para baixo: A = 1ª alternativa, B = 2ª, C = 3ª, e assim por diante (use quantas letras forem necessárias). Ignore a numeração da própria pergunta (ex.: "9.").
+
+Identifique TODAS as alternativas corretas — normalmente é só uma, mas algumas questões têm mais de uma.
+
+Responda SOMENTE com um objeto JSON, sem nenhum texto fora dele, neste formato:
+{"letras": ["<letra>", "..."], "texto": "<texto exato da(s) alternativa(s) correta(s)>"}
+
+Regras do JSON:
+- "letras": lista com a(s) letra(s) da(s) alternativa(s) correta(s).
+- "texto": o texto exato da(s) alternativa(s) correta(s); se houver mais de uma, separe com " ; ".
 
 Questão:
 {{QUESTION}}`;
@@ -130,19 +139,21 @@ async function handleQuestion(selectionText, mode) {
     }
 
     // modo "choice"
-    const answer = normalizeAnswer(raw);
-    if (answer) {
-      console.log(`[Macaco] Resposta: "${answer}" (modelo ${useModel})`);
-      // Badge cabe ~4 chars; respostas-texto maiores viram "✓" e aparecem no popup.
-      await setBadge(answer.length <= 4 ? answer : "✓", COLORS.ok);
-      await saveResult({ type: "answer", value: answer, raw, question: text });
+    const { letters, detail } = parseChoice(raw);
+    if (letters.length) {
+      const display = letters.join(", "); // ex.: "B" ou "A, C, D, F"
+      const compact = letters.join("");    // ex.: "B" ou "ACDF"
+      console.log(`[Macaco] Alternativa(s): ${display} (modelo ${useModel})`);
+      // Badge cabe ~4 chars; conjuntos maiores viram "✓" e aparecem no popup.
+      await setBadge(compact.length <= 4 ? compact : "✓", COLORS.ok);
+      await saveResult({ type: "answer", value: display, detail, raw, question: text });
     } else {
-      console.warn(`[Macaco] Formato inesperado da API:`, raw);
+      console.warn(`[Macaco] Resposta não interpretável:`, raw);
       await setBadge("?", COLORS.warn);
       await saveResult({
         type: "error",
         value: "?",
-        message: "A API respondeu, mas não consegui extrair a alternativa. Tente o modo \"resposta aberta\".",
+        message: "Não consegui interpretar a resposta da IA. Veja o texto cru abaixo ou tente o modo \"resposta aberta\".",
         raw,
         question: text
       });
@@ -207,7 +218,7 @@ async function callGemini(apiKey, model, prompt, generationConfig) {
   if (!textOut) {
     const finish = cand?.finishReason;
     if (finish === "MAX_TOKENS") {
-      throw kinded("api", "O modelo gastou o orçamento de tokens 'pensando' e não retornou texto. Use o Flash ou aumente o limite.");
+      throw kinded("api", "O modelo atingiu o limite de tokens sem concluir a resposta. Tente de novo ou aumente maxOutputTokens.");
     }
     if (finish === "SAFETY" || data?.promptFeedback?.blockReason) {
       throw kinded("api", "Conteúdo bloqueado pelos filtros de segurança do Gemini.");
@@ -222,41 +233,50 @@ function buildPrompt(mode, question) {
   return template.replace("{{QUESTION}}", question);
 }
 
-// Gemini 2.5 são modelos "thinking": gastam tokens pensando ANTES de responder.
-// Com maxOutputTokens baixo isso zera a resposta visível. Por isso:
-//  - Flash/Flash-Lite: desligamos o thinking (budget 0).
-//  - Pro: não permite budget 0 (mínimo 128) → reservamos folga no maxOutputTokens.
-// O modo "open" precisa de mais tokens de saída (cabe ~1 parágrafo); "choice" usa pouquíssimos.
-function buildGenerationConfig(model, mode) {
-  const m = (model || "").toLowerCase();
-  const isFlash = m.includes("flash") || m.includes("lite");
-  const isOpen = mode === "open";
-
-  const cfg = { temperature: isOpen ? 0.2 : 0.1 };
-
-  if (isFlash) {
-    cfg.thinkingConfig = { thinkingBudget: 0 };
-    cfg.maxOutputTokens = isOpen ? 256 : 24;
-  } else {
-    cfg.thinkingConfig = { thinkingBudget: 128 };
-    cfg.maxOutputTokens = isOpen ? 768 : 512;
+// Config por modo. Com a API paga, deixamos o "thinking" DINÂMICO (thinkingBudget: -1):
+// a IA pensa o quanto precisar para acertar. O teto de saída é alto só para nunca
+// truncar — você paga pelos tokens realmente gerados, não pelo teto.
+// (Otimização de custo fica para depois, se quisermos limitar o thinking.)
+function buildGenerationConfig(_model, mode) {
+  if (mode === "open") {
+    return {
+      temperature: 0.3,
+      thinkingConfig: { thinkingBudget: -1 },
+      maxOutputTokens: 4096
+    };
   }
-  return cfg;
+  // choice → saída estruturada em JSON, determinística
+  return {
+    temperature: 0.1,
+    responseMimeType: "application/json",
+    thinkingConfig: { thinkingBudget: -1 },
+    maxOutputTokens: 8192
+  };
 }
 
-// Normaliza a resposta do modo "alternativa", tolerando pontuação/aspas:
-//  - letra única (A-Z) ou número de 1-2 dígitos → rótulo da alternativa
-//  - senão, aceita o texto curto da alternativa (quizzes sem rótulo: "HTML", "CSS"...)
-function normalizeAnswer(raw) {
-  if (!raw) return null;
-  const firstLine = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || "";
-  const stripped = firstLine.replace(/^["'`.\s()\[\]-]+|["'`.\s()\[\]-]+$/g, "").trim();
-  const compact = stripped.replace(/[^A-Za-z0-9]/g, "");
-  if (/^[A-Za-z]$/.test(compact)) return compact.toUpperCase();
-  if (/^[0-9]{1,2}$/.test(compact)) return compact;
-  // fallback: texto curto da alternativa (até 3 palavras / 24 caracteres)
-  if (stripped && stripped.length <= 24 && stripped.split(/\s+/).length <= 3) return stripped;
-  return null;
+// Interpreta a resposta JSON do modo "alternativa".
+// Espera {"letras":["B"], "texto":"..."}. Retorna { letters, detail }.
+function parseChoice(raw) {
+  let letters = [];
+  let detail = "";
+  try {
+    const obj = JSON.parse(stripJsonFence(raw));
+    if (Array.isArray(obj.letras)) {
+      letters = obj.letras
+        .map((x) => String(x).trim().toUpperCase())
+        .filter((x) => /^[A-Z]$/.test(x));
+    }
+    if (typeof obj.texto === "string") detail = obj.texto.trim();
+  } catch (_) {
+    // não veio JSON válido → letters fica vazio (estado "?")
+  }
+  letters = [...new Set(letters)]; // remove duplicatas mantendo a ordem
+  return { letters, detail };
+}
+
+// Remove cercas ```json ... ``` caso o modelo as inclua (não deveria com responseMimeType).
+function stripJsonFence(s) {
+  return (s || "").replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
 }
 
 // ---------------------------------------------------------------------------

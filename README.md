@@ -4,7 +4,7 @@ Extensão de navegador (Microsoft Edge / Chromium — **Manifest V3**) que respo
 
 Fluxo: você seleciona o texto → botão direito → escolhe um dos dois itens:
 
-- **"Responder alternativa (letra/número)"** → resposta curta (ex.: `A` ou `3`) no **badge sobre o ícone** e no popup.
+- **"Responder alternativa"** → a IA mapeia as alternativas para letras (A, B, C... por posição) e devolve a(s) correta(s). Letra(s) no **badge sobre o ícone** (ex.: `B`, `ACDF`) e **letra + texto** no popup. Suporta mais de uma correta.
 - **"Explicar / resposta aberta"** → resposta objetiva em **até 1 parágrafo** no **popup** (o badge mostra `✓`).
 
 ---
@@ -30,8 +30,8 @@ Fluxo: você seleciona o texto → botão direito → escolhe um dos dois itens:
 
 - **Service worker** (`background.js`) cria os itens de menu de contexto, recebe o texto selecionado, chama a API do Gemini e escreve o resultado.
 - **Dois modos**, escolhidos pelo item do menu de botão direito:
-  - **Alternativa** (`choice`): identifica a alternativa correta. Se as opções têm rótulo (A, B, C... ou número), responde com o rótulo; se **não** têm rótulo, responde com o **texto** da alternativa (ex.: `HTML`). Vai pro **badge** (texto longo vira `✓`) e pro popup.
-  - **Resposta aberta** (`open`): prompt pede resposta direta em até 1 parágrafo, `maxOutputTokens` maior → texto no **popup** (o badge vira `✓`, pois não cabe parágrafo).
+  - **Alternativa** (`choice`): a IA numera as alternativas como letras (A = 1ª, B = 2ª...) **por posição**, raciocina (thinking) e devolve a(s) correta(s) em **JSON** (`{"letras":[...],"texto":"..."}`). Funciona com alternativas de texto longo e com **mais de uma** correta. Badge mostra a(s) letra(s) (5+ viram `✓`); popup mostra **letra + texto**.
+  - **Resposta aberta** (`open`): prompt pede resposta direta em até 1 parágrafo → texto no **popup** (o badge vira `✓`, pois não cabe parágrafo).
 - O **popup** (clique no ícone) também mostra um **histórico** das últimas respostas.
 - **Atalhos de teclado** (padrão): `Ctrl+Shift+1` → modo alternativa, `Ctrl+Shift+2` → modo aberto. Configuráveis em `edge://extensions/shortcuts`.
 - A API key e o modelo escolhido ficam em `chrome.storage.local` — **nunca** no código.
@@ -65,10 +65,10 @@ Na primeira instalação, como ainda não há API key, a **página de opções a
 
 1. Em qualquer página, **selecione com o mouse** o texto.
 2. **Botão direito** e escolha o modo:
-   - **"Responder alternativa (letra/número)"** — para múltipla escolha. Selecione a questão **incluindo as alternativas**. *(atalho: `Ctrl+Shift+1`.)*
+   - **"Responder alternativa"** — para múltipla escolha. Selecione a questão **incluindo todas as alternativas**. *(atalho: `Ctrl+Shift+1`.)*
    - **"Explicar / resposta aberta"** — para perguntas abertas/teóricas. Ex.: *"O que é um algoritmo?"*, *"Escreva um exemplo de senha forte"*, *"Em que ano o HTML lançou sua primeira versão?"*. *(atalho: `Ctrl+Shift+2`.)*
 3. Enquanto processa, o badge mostra **`…`**. Depois:
-   - modo alternativa → a letra/número aparece no badge (ex.: **`A`**, em verde) e no popup em fonte grande;
+   - modo alternativa → a(s) letra(s) aparece(m) no badge (ex.: **`B`** ou **`ACDF`**, em verde) e a letra + texto no popup;
    - modo aberto → o badge mostra **`✓`** e o **parágrafo** aparece no popup.
 4. Clique no ícone da extensão para abrir o **popup** com a resposta e o histórico das últimas respostas.
 
@@ -93,7 +93,7 @@ Para ver os logs do service worker (debug): em `edge://extensions/` → "Macaco 
 | Badge | Cor | Significado |
 |------|------|-------------|
 | `…` | cinza | Processando a requisição |
-| `A` / `3` | verde | Resposta de alternativa válida (letra ou número) |
+| `B` / `ACDF` | verde | Letra(s) da(s) alternativa(s) correta(s) — texto completo no popup |
 | `✓` | verde | Resposta pronta no **popup** — parágrafo (modo aberto) ou alternativa de texto longo |
 | `!` | âmbar | API key ausente ou inválida (abre as opções) |
 | `?` | âmbar | Nenhum texto selecionado **ou** resposta em formato inesperado |
@@ -118,8 +118,8 @@ O motivo detalhado de qualquer estado de erro aparece no **popup** (clique no í
 **Badge `X` com 429 (rate limit)**
 - Você atingiu o limite do tier gratuito. Aguarde alguns segundos/minutos e tente de novo.
 
-**Badge `?` (não consegui extrair a alternativa)**
-- O modelo respondeu algo que não dá pra mapear numa alternativa curta. Veja a mensagem no popup. Use o modo **"Explicar / resposta aberta"** (`Ctrl+Shift+2`) ou troque para `gemini-2.5-pro` nas opções.
+**Badge `?` (não consegui interpretar a resposta)**
+- A IA não devolveu um JSON válido com as letras. Veja o texto cru no popup/console. Tente de novo, use o modo **"Explicar / resposta aberta"** (`Ctrl+Shift+2`) ou troque o modelo nas opções.
 
 **Erro de CORS / falha de rede**
 - O domínio `https://generativelanguage.googleapis.com/*` já está declarado em `host_permissions`. Se aparecer erro de rede, verifique sua conexão e se a key é válida.
@@ -145,13 +145,14 @@ Idêntico ao Edge — o Chrome é Chromium também:
 
 O briefing deu liberdade para mudar decisões técnicas, desde que documentadas. As mudanças:
 
-### 1. "Thinking" do Gemini 2.5 desligado (mudança importante)
-Os modelos **Gemini 2.5 são "thinking models"**: eles gastam tokens *pensando* antes de produzir a resposta visível. Com o `maxOutputTokens: 10` sugerido no briefing, o modelo consumiria os 10 tokens **só no raciocínio interno** e devolveria **texto vazio** (`finishReason: MAX_TOKENS`). Solução adotada em `buildGenerationConfig()`:
+### 1. "Thinking" dinâmico + saída estruturada (mudança importante)
+Os modelos **Gemini 2.5 são "thinking models"**: gastam tokens *pensando* antes de responder. Como a API é **paga**, deixamos o **thinking dinâmico** (`thinkingConfig.thinkingBudget = -1`) — a IA pensa o quanto precisar para acertar — com `maxOutputTokens` alto (`4096` no modo aberto, `8192` no alternativa) só para **nunca truncar** a resposta. Você paga pelos tokens realmente gerados, não pelo teto.
 
-- **Flash / Flash-Lite:** `thinkingConfig.thinkingBudget = 0` (desliga o thinking). `maxOutputTokens = 24` no modo alternativa (cabe um rótulo ou o texto curto da opção); `256` no modo aberto (cabe ~1 parágrafo).
-- **Pro:** o Pro **não permite** budget 0 (mínimo 128). Então usamos `thinkingBudget = 128` e `maxOutputTokens = 512` (alternativa) / `768` (aberto) para reservar folga e não cair no `MAX_TOKENS`.
+No **modo alternativa**, a saída é **JSON estruturado** (`responseMimeType: "application/json"`): a IA mapeia as alternativas para letras por posição (A = 1ª, B = 2ª...) e devolve `{"letras":[...],"texto":"..."}`. Isso funciona com alternativas de texto longo e com mais de uma correta, sem depender de o quiz ter rótulos. O `parseChoice()` lê esse JSON.
 
-`temperature` = `0.1` no modo alternativa (determinístico) e `0.2` no modo aberto. O prompt do modo alternativa é exatamente o do briefing.
+`temperature` = `0.1` (alternativa, determinístico) e `0.3` (aberto).
+
+> Histórico: antes o thinking ficava **desligado** (budget 0) e o `maxOutputTokens` mínimo, para economizar no tier gratuito. Com a API assinada, priorizamos acerto sobre custo. Dá para reativar a economia depois limitando o `thinkingBudget`.
 
 ### 2. API key enviada no header, não na URL
 A chamada usa o header `x-goog-api-key` em vez de `?key=...` na URL. Funciona igual e evita a key aparecer em logs de URL.
@@ -176,21 +177,17 @@ O briefing pedia popup ao clicar **e** "abrir options ao clicar" quando a key es
 ### 6. Modo de resposta aberta + impacto em tokens
 Além de múltipla escolha, a extensão responde **perguntas abertas** (segundo item do menu): resposta objetiva em até 1 parágrafo, exibida no popup.
 
-**Custo em tokens** (vs. modo alternativa):
-- **Entrada:** ~igual, às vezes **menor** — uma pergunta aberta costuma ser mais curta que uma questão com todas as alternativas.
-- **Saída:** **maior** — alternativa gera ~1 token (`A`); um parágrafo gera ~60–120 tokens.
-
-O `maxOutputTokens` (256 no Flash) **limita** o tamanho e, com isso, o custo — que continua irrisório no tier gratuito. Como o thinking fica **desligado** no Flash, não há tokens "escondidos" de raciocínio.
+**Custo em tokens:** com o thinking dinâmico ligado, cada requisição inclui os tokens de raciocínio (cobrados como **saída**). Em questão simples o thinking é curto; em difícil, maior. No **modo alternativa** a saída visível é minúscula (só o JSON), mas o thinking entra na conta; no **modo aberto** soma-se o parágrafo. No Flash o custo por requisição segue na casa de frações de centavo de dólar. Para cortar custo depois, basta limitar o `thinkingBudget`.
 
 ### Validação do fluxo (teste mental)
 - **Sem key → 1º uso:** `onInstalled` abre as opções. ✓
-- **Modo alternativa:** `contextMenus.onClicked` (item "alternativa") → `info.selectionText` → `callGemini` → `normalizeAnswer` → badge `A` + popup. ✓
-- **Modo aberto:** item "resposta aberta" → prompt aberto + `maxOutputTokens` maior → texto no popup, badge `✓`. ✓
+- **Modo alternativa:** `contextMenus.onClicked` → `callGemini` (JSON) → `parseChoice` extrai letras + texto → badge com a(s) letra(s) + popup (letra + texto). ✓
+- **Modo aberto:** item "resposta aberta" → prompt aberto → texto no popup, badge `✓`. ✓
 - **Atalhos de teclado:** `commands.onCommand` roteia `Ctrl+Shift+1` → alternativa e `Ctrl+Shift+2` → aberto; lê a seleção via `scripting.executeScript`. ✓
 - **Badge limpo:** `setBadgeText({text:""})` no início de cada `handleQuestion`. ✓
 - **Key inválida:** HTTP 400/403 com "API key" → badge `!` + abre opções. ✓
 - **Rate limit:** HTTP 429 → badge `X`. ✓
-- **Formato inesperado:** `normalizeAnswer` retorna `null` → badge `?`. ✓
+- **JSON inválido:** `parseChoice` não acha letras → badge `?` (texto cru fica no popup/console). ✓
 - **SW reiniciado:** listeners no topo do arquivo + estado em `storage` → nada depende de variável global em memória. ✓
 
 ---

@@ -21,6 +21,14 @@ body {
   letter-spacing: 1px;
 }
 
+.answer-detail {
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.4;
+  opacity: 0.9;
+}
+.answer-detail:empty { display: none; }
+
 .meta { margin-top: 8px; font-size: 12px; opacity: 0.6; }
 
 #message-view { text-align: center; padding: 8px 0; }

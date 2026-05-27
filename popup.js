@@ -30,8 +30,9 @@ async function render() {
     const v = lastResult.value || "";
     const el = $("answer");
     el.textContent = v;
-    // Letra/número curto → fonte grande; texto de alternativa → encolhe pra caber.
-    el.style.fontSize = v.length <= 2 ? "76px" : v.length <= 6 ? "40px" : "24px";
+    // 1 letra → fonte grande; conjunto de letras (ex.: "A, C, D, F") → encolhe pra caber.
+    el.style.fontSize = v.length <= 2 ? "76px" : v.length <= 6 ? "44px" : "30px";
+    $("answer-detail").textContent = lastResult.detail || "";
     $("meta").textContent = timeAgo(lastResult.ts);
     $("answer-view").hidden = false;
   } else if (lastResult.type === "open") {
