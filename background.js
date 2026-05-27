@@ -19,11 +19,10 @@ const COLORS = {
   err: "#dc2626"   // vermelho — rate limit ("X") ou erro de API/rede
 };
 
-const PROMPT_CHOICE = `Você é um assistente que responde questões de múltipla escolha.
-Responda APENAS com a letra ou número da alternativa correta.
-Sem explicação, sem texto adicional, sem pontuação, sem aspas.
-Exemplos de resposta válida: A
-Outro exemplo válido: 3
+const PROMPT_CHOICE = `Você responde questões de múltipla escolha. Responda de forma CURTA, sem explicação e sem pontuação:
+- Se as alternativas tiverem rótulo (letra A, B, C... ou número), responda APENAS com esse rótulo.
+- Se as alternativas NÃO tiverem rótulo, responda APENAS com o texto exato da alternativa correta.
+Não escreva mais nada.
 
 Questão:
 {{QUESTION}}`;
@@ -134,7 +133,8 @@ async function handleQuestion(selectionText, mode) {
     const answer = normalizeAnswer(raw);
     if (answer) {
       console.log(`[Macaco] Resposta: "${answer}" (modelo ${useModel})`);
-      await setBadge(answer, COLORS.ok);
+      // Badge cabe ~4 chars; respostas-texto maiores viram "✓" e aparecem no popup.
+      await setBadge(answer.length <= 4 ? answer : "✓", COLORS.ok);
       await saveResult({ type: "answer", value: answer, raw, question: text });
     } else {
       console.warn(`[Macaco] Formato inesperado da API:`, raw);
@@ -142,7 +142,7 @@ async function handleQuestion(selectionText, mode) {
       await saveResult({
         type: "error",
         value: "?",
-        message: "A API respondeu, mas não num formato de letra/número curto. Tente o modo \"resposta aberta\".",
+        message: "A API respondeu, mas não consegui extrair a alternativa. Tente o modo \"resposta aberta\".",
         raw,
         question: text
       });
@@ -236,7 +236,7 @@ function buildGenerationConfig(model, mode) {
 
   if (isFlash) {
     cfg.thinkingConfig = { thinkingBudget: 0 };
-    cfg.maxOutputTokens = isOpen ? 256 : 10;
+    cfg.maxOutputTokens = isOpen ? 256 : 24;
   } else {
     cfg.thinkingConfig = { thinkingBudget: 128 };
     cfg.maxOutputTokens = isOpen ? 768 : 512;
@@ -244,13 +244,18 @@ function buildGenerationConfig(model, mode) {
   return cfg;
 }
 
-// Extrai uma letra (A-Z) ou número curto da resposta crua, tolerando pontuação/aspas.
+// Normaliza a resposta do modo "alternativa", tolerando pontuação/aspas:
+//  - letra única (A-Z) ou número de 1-2 dígitos → rótulo da alternativa
+//  - senão, aceita o texto curto da alternativa (quizzes sem rótulo: "HTML", "CSS"...)
 function normalizeAnswer(raw) {
   if (!raw) return null;
   const firstLine = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0] || "";
-  const cleaned = firstLine.replace(/[^A-Za-z0-9]/g, "");
-  if (/^[A-Za-z]$/.test(cleaned)) return cleaned.toUpperCase();
-  if (/^[0-9]{1,2}$/.test(cleaned)) return cleaned;
+  const stripped = firstLine.replace(/^["'`.\s()\[\]-]+|["'`.\s()\[\]-]+$/g, "").trim();
+  const compact = stripped.replace(/[^A-Za-z0-9]/g, "");
+  if (/^[A-Za-z]$/.test(compact)) return compact.toUpperCase();
+  if (/^[0-9]{1,2}$/.test(compact)) return compact;
+  // fallback: texto curto da alternativa (até 3 palavras / 24 caracteres)
+  if (stripped && stripped.length <= 24 && stripped.split(/\s+/).length <= 3) return stripped;
   return null;
 }
 

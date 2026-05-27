@@ -27,7 +27,11 @@ async function render() {
       false
     );
   } else if (lastResult.type === "answer") {
-    $("answer").textContent = lastResult.value;
+    const v = lastResult.value || "";
+    const el = $("answer");
+    el.textContent = v;
+    // Letra/número curto → fonte grande; texto de alternativa → encolhe pra caber.
+    el.style.fontSize = v.length <= 2 ? "76px" : v.length <= 6 ? "40px" : "24px";
     $("meta").textContent = timeAgo(lastResult.ts);
     $("answer-view").hidden = false;
   } else if (lastResult.type === "open") {

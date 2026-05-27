@@ -30,7 +30,7 @@ Fluxo: você seleciona o texto → botão direito → escolhe um dos dois itens:
 
 - **Service worker** (`background.js`) cria os itens de menu de contexto, recebe o texto selecionado, chama a API do Gemini e escreve o resultado.
 - **Dois modos**, escolhidos pelo item do menu de botão direito:
-  - **Alternativa** (`choice`): prompt força só a letra/número, `maxOutputTokens` baixo → resposta no **badge** (forma primária) e no popup em fonte grande.
+  - **Alternativa** (`choice`): identifica a alternativa correta. Se as opções têm rótulo (A, B, C... ou número), responde com o rótulo; se **não** têm rótulo, responde com o **texto** da alternativa (ex.: `HTML`). Vai pro **badge** (texto longo vira `✓`) e pro popup.
   - **Resposta aberta** (`open`): prompt pede resposta direta em até 1 parágrafo, `maxOutputTokens` maior → texto no **popup** (o badge vira `✓`, pois não cabe parágrafo).
 - O **popup** (clique no ícone) também mostra um **histórico** das últimas respostas.
 - **Atalhos de teclado** (padrão): `Ctrl+Shift+1` → modo alternativa, `Ctrl+Shift+2` → modo aberto. Configuráveis em `edge://extensions/shortcuts`.
@@ -94,7 +94,7 @@ Para ver os logs do service worker (debug): em `edge://extensions/` → "Macaco 
 |------|------|-------------|
 | `…` | cinza | Processando a requisição |
 | `A` / `3` | verde | Resposta de alternativa válida (letra ou número) |
-| `✓` | verde | Resposta aberta pronta — abra o **popup** para ler o parágrafo |
+| `✓` | verde | Resposta pronta no **popup** — parágrafo (modo aberto) ou alternativa de texto longo |
 | `!` | âmbar | API key ausente ou inválida (abre as opções) |
 | `?` | âmbar | Nenhum texto selecionado **ou** resposta em formato inesperado |
 | `X` | vermelho | Erro de API/rede ou **rate limit** (429) |
@@ -118,8 +118,8 @@ O motivo detalhado de qualquer estado de erro aparece no **popup** (clique no í
 **Badge `X` com 429 (rate limit)**
 - Você atingiu o limite do tier gratuito. Aguarde alguns segundos/minutos e tente de novo.
 
-**Badge `?` (formato inesperado)**
-- Raro. Normalmente significa que o modelo respondeu algo que não é uma letra/número curto. Veja o texto cru no popup. Em questões muito difíceis, troque para `gemini-2.5-pro` nas opções.
+**Badge `?` (não consegui extrair a alternativa)**
+- O modelo respondeu algo que não dá pra mapear numa alternativa curta. Veja a mensagem no popup. Use o modo **"Explicar / resposta aberta"** (`Ctrl+Shift+2`) ou troque para `gemini-2.5-pro` nas opções.
 
 **Erro de CORS / falha de rede**
 - O domínio `https://generativelanguage.googleapis.com/*` já está declarado em `host_permissions`. Se aparecer erro de rede, verifique sua conexão e se a key é válida.
@@ -148,7 +148,7 @@ O briefing deu liberdade para mudar decisões técnicas, desde que documentadas.
 ### 1. "Thinking" do Gemini 2.5 desligado (mudança importante)
 Os modelos **Gemini 2.5 são "thinking models"**: eles gastam tokens *pensando* antes de produzir a resposta visível. Com o `maxOutputTokens: 10` sugerido no briefing, o modelo consumiria os 10 tokens **só no raciocínio interno** e devolveria **texto vazio** (`finishReason: MAX_TOKENS`). Solução adotada em `buildGenerationConfig()`:
 
-- **Flash / Flash-Lite:** `thinkingConfig.thinkingBudget = 0` (desliga o thinking). `maxOutputTokens = 10` no modo alternativa; `256` no modo aberto (cabe ~1 parágrafo).
+- **Flash / Flash-Lite:** `thinkingConfig.thinkingBudget = 0` (desliga o thinking). `maxOutputTokens = 24` no modo alternativa (cabe um rótulo ou o texto curto da opção); `256` no modo aberto (cabe ~1 parágrafo).
 - **Pro:** o Pro **não permite** budget 0 (mínimo 128). Então usamos `thinkingBudget = 128` e `maxOutputTokens = 512` (alternativa) / `768` (aberto) para reservar folga e não cair no `MAX_TOKENS`.
 
 `temperature` = `0.1` no modo alternativa (determinístico) e `0.2` no modo aberto. O prompt do modo alternativa é exatamente o do briefing.
