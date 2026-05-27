@@ -1,0 +1,82 @@
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  width: 240px;
+  font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: #ffffff;
+  color: #111827;
+}
+
+#app { padding: 16px; }
+
+#answer-view { text-align: center; padding: 12px 0 4px; }
+
+.answer {
+  font-size: 76px;
+  font-weight: 800;
+  line-height: 1;
+  color: #16a34a;
+  letter-spacing: 1px;
+}
+
+.meta { margin-top: 8px; font-size: 12px; opacity: 0.6; }
+
+#message-view { text-align: center; padding: 8px 0; }
+.msg-icon { font-size: 34px; margin-bottom: 8px; }
+.msg-text { font-size: 13px; line-height: 1.45; opacity: 0.9; }
+
+.btn {
+  margin-top: 12px;
+  width: 100%;
+  padding: 9px 10px;
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn:hover { background: #1d4ed8; }
+
+.history {
+  margin-top: 14px;
+  border-top: 1px solid #e5e7eb;
+  padding-top: 10px;
+}
+.history-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.55;
+  margin-bottom: 6px;
+}
+#history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 168px;
+  overflow-y: auto;
+}
+#history-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.h-val { font-weight: 700; color: #16a34a; min-width: 18px; }
+.h-snip {
+  color: #6b7280;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (prefers-color-scheme: dark) {
+  body { background: #1f2937; color: #f9fafb; }
+  .history { border-color: #374151; }
+  .h-snip { color: #9ca3af; }
+}

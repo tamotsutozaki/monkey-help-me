@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Macaco Ajuda",
+  "version": "1.0.0",
+  "description": "Responde questões de múltipla escolha selecionadas na página usando a API do Google Gemini. Resposta aparece no badge do ícone e no popup.",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Macaco Ajuda — resposta no badge",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "answer-selection": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y"
+      },
+      "description": "Responder a questão selecionada"
+    }
+  }
+}

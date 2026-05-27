@@ -1,0 +1,17 @@
+# A API key fica no chrome.storage.local (no navegador), nunca em arquivo do projeto.
+# Estas entradas são prevenção caso você crie configs locais com segredos.
+*.local
+*.local.json
+config.local.*
+secrets.*
+.env
+.env.*
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Caso adicione build/empacotamento no futuro
+node_modules/
+dist/
+*.zip
