@@ -35,7 +35,7 @@ Fluxo: você seleciona o texto → botão direito → escolhe um dos itens (ou u
   - **Resposta aberta** (`open`): prompt pede resposta direta em até 1 parágrafo → texto no **popup** (o badge vira `✓`, pois não cabe parágrafo).
   - **Imagem / recorte** (`image`): `chrome.tabs.captureVisibleTab` tira print da aba, você arrasta um retângulo (overlay), o recorte é cortado (`OffscreenCanvas`, com `devicePixelRatio`) e enviado ao Gemini (visão). Responde como alternativa (letras). Para texto **não selecionável**.
 - O **popup** (clique no ícone) também mostra um **histórico** das últimas respostas.
-- **Atalhos de teclado** (padrão): `Ctrl+Shift+1` → alternativa, `Ctrl+Shift+2` → aberto, `Ctrl+Shift+3` → recorte de imagem. Configuráveis em `edge://extensions/shortcuts`.
+- **Atalhos de teclado** (padrão): `Alt+Z` → alternativa, `Alt+X` → aberto, `Alt+C` → recorte de imagem. Configuráveis em `edge://extensions/shortcuts`.
 - A API key e o modelo escolhido ficam em `chrome.storage.local` — **nunca** no código.
 
 ---
@@ -67,9 +67,9 @@ Na primeira instalação, como ainda não há API key, a **página de opções a
 
 1. Em qualquer página, **selecione com o mouse** o texto.
 2. **Botão direito** e escolha o modo:
-   - **"Responder alternativa"** — para múltipla escolha. Selecione a questão **incluindo todas as alternativas**. *(atalho: `Ctrl+Shift+1`.)*
-   - **"Explicar / resposta aberta"** — para perguntas abertas/teóricas. Ex.: *"O que é um algoritmo?"*, *"Escreva um exemplo de senha forte"*, *"Em que ano o HTML lançou sua primeira versão?"*. *(atalho: `Ctrl+Shift+2`.)*
-   - **"Responder questão da imagem (recorte)"** — quando o texto **não** é selecionável. Arraste o retângulo sobre a questão + alternativas. *(atalho: `Ctrl+Shift+3`; `Esc` cancela.)*
+   - **"Responder alternativa"** — para múltipla escolha. Selecione a questão **incluindo todas as alternativas**. *(atalho: `Alt+Z`.)*
+   - **"Explicar / resposta aberta"** — para perguntas abertas/teóricas. Ex.: *"O que é um algoritmo?"*, *"Escreva um exemplo de senha forte"*, *"Em que ano o HTML lançou sua primeira versão?"*. *(atalho: `Alt+X`.)*
+   - **"Responder questão da imagem (recorte)"** — quando o texto **não** é selecionável. Arraste o retângulo sobre a questão + alternativas. *(atalho: `Alt+C`; `Esc` cancela.)*
 3. Enquanto processa, o badge mostra **`…`**. Depois:
    - modo alternativa → a(s) letra(s) aparece(m) no badge (ex.: **`B`** ou **`ACDF`**, em verde) e a letra + texto no popup;
    - modo aberto → o badge mostra **`✓`** e o **parágrafo** aparece no popup;
@@ -123,9 +123,9 @@ O motivo detalhado de qualquer estado de erro aparece no **popup** (clique no í
 - Você atingiu o limite do tier gratuito. Aguarde alguns segundos/minutos e tente de novo.
 
 **Badge `?` (não consegui interpretar a resposta)**
-- A IA não devolveu um JSON válido com as letras. Veja o texto cru no popup/console. Tente de novo, use o modo **"Explicar / resposta aberta"** (`Ctrl+Shift+2`) ou troque o modelo nas opções.
+- A IA não devolveu um JSON válido com as letras. Veja o texto cru no popup/console. Tente de novo, use o modo **"Explicar / resposta aberta"** (`Alt+X`) ou troque o modelo nas opções.
 
-**O recorte de imagem (`Ctrl+Shift+3`) não funciona**
+**O recorte de imagem (`Alt+C`) não funciona**
 - Páginas restritas (`edge://`, Web Store, visualizador de PDF) **não** permitem captura — abra a questão numa página normal.
 - O overlay mostra "Arraste para recortar"; `Esc` cancela. Recorte um pouco **maior** que a questão para não cortar alternativas.
 - Se sair desalinhado, costuma ser zoom/escala da tela; o crop já considera o `devicePixelRatio`, mas recortar com folga ajuda.
@@ -133,9 +133,9 @@ O motivo detalhado de qualquer estado de erro aparece no **popup** (clique no í
 **Erro de CORS / falha de rede**
 - O domínio `https://generativelanguage.googleapis.com/*` já está declarado em `host_permissions`. Se aparecer erro de rede, verifique sua conexão e se a key é válida.
 
-**Os atalhos `Ctrl+Shift+1` / `Ctrl+Shift+2` / `Ctrl+Shift+3` não funcionam**
+**Os atalhos `Alt+Z` / `Alt+X` / `Alt+C` não funcionam**
 - Pode haver conflito com outro atalho do sistema/navegador. Vá em `edge://extensions/shortcuts` e defina combinações livres para os três comandos da "Macaco Ajuda".
-- Combos já usados pelo Edge (evite): `Ctrl+Shift+Y` (Coleções), `Ctrl+Shift+U` (Ler em voz alta), `Ctrl+Shift+K` (duplicar aba), `Ctrl+Shift+E` (busca na barra lateral).
+- `Alt+letra` pode, em alguns sites, esbarrar em `accesskey` da própria página. Se acontecer numa página específica, abra o `edge://extensions/shortcuts` e troque por `Ctrl+Shift+Z/X/C` ou outra combinação livre.
 
 ---
 
@@ -189,7 +189,7 @@ Além de múltipla escolha, a extensão responde **perguntas abertas** (segundo 
 **Custo em tokens:** com o thinking dinâmico ligado, cada requisição inclui os tokens de raciocínio (cobrados como **saída**). Em questão simples o thinking é curto; em difícil, maior. No **modo alternativa** a saída visível é minúscula (só o JSON), mas o thinking entra na conta; no **modo aberto** soma-se o parágrafo. No Flash o custo por requisição segue na casa de frações de centavo de dólar. Para cortar custo depois, basta limitar o `thinkingBudget`.
 
 ### 7. Modo imagem (recorte da tela → visão)
-Algumas telas têm o texto dentro de botões/canvas e não dá para selecionar. Por isso o modo **imagem** (`Ctrl+Shift+3` ou item do menu):
+Algumas telas têm o texto dentro de botões/canvas e não dá para selecionar. Por isso o modo **imagem** (`Alt+C` ou item do menu):
 - `chrome.tabs.captureVisibleTab` tira um print da área visível da aba (coberto pela permissão `activeTab`, sem prompt novo).
 - Um overlay injetado deixa você **arrastar um retângulo**; ele é removido **antes** do print (espera 2 frames) para não aparecer na imagem.
 - O recorte é cortado com `OffscreenCanvas` no service worker, multiplicando pelo `devicePixelRatio` (print em px físicos, retângulo em px CSS).
@@ -201,7 +201,7 @@ Limitações: captura só a área **visível** da página ativa; páginas `edge:
 - **Sem key → 1º uso:** `onInstalled` abre as opções. ✓
 - **Modo alternativa:** `contextMenus.onClicked` → `callGemini` (JSON) → `parseChoice` extrai letras + texto → badge com a(s) letra(s) + popup (letra + texto). ✓
 - **Modo aberto:** item "resposta aberta" → prompt aberto → texto no popup, badge `✓`. ✓
-- **Atalhos de teclado:** `commands.onCommand` roteia `Ctrl+Shift+1` → alternativa, `Ctrl+Shift+2` → aberto e `Ctrl+Shift+3` → recorte de imagem. ✓
+- **Atalhos de teclado:** `commands.onCommand` roteia `Alt+Z` → alternativa, `Alt+X` → aberto e `Alt+C` → recorte de imagem. ✓
 - **Modo imagem:** overlay arrasta retângulo → `captureVisibleTab` + crop (`OffscreenCanvas`, com DPR) → `inlineData` ao Gemini → `parseChoice` → badge com letras. ✓
 - **Badge limpo:** `setBadgeText({text:""})` no início de cada `handleQuestion`. ✓
 - **Key inválida:** HTTP 400/403 com "API key" → badge `!` + abre opções. ✓

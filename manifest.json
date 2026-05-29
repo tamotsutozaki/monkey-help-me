@@ -33,19 +33,19 @@
   "commands": {
     "answer-selection": {
       "suggested_key": {
-        "default": "Ctrl+Shift+1"
+        "default": "Alt+Z"
       },
       "description": "Responder alternativa (letra/número)"
     },
     "answer-open-selection": {
       "suggested_key": {
-        "default": "Ctrl+Shift+2"
+        "default": "Alt+X"
       },
       "description": "Explicar / resposta aberta"
     },
     "answer-image-selection": {
       "suggested_key": {
-        "default": "Ctrl+Shift+3"
+        "default": "Alt+C"
       },
       "description": "Responder questão da imagem (recorte da tela)"
     }

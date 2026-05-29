@@ -4,7 +4,7 @@
 //   - "choice": múltipla escolha → a IA mapeia as alternativas para letras (A, B, C...)
 //     por posição e devolve a(s) correta(s) em JSON; letra(s) no badge, letra+texto no popup.
 //   - "open":   pergunta aberta → resposta objetiva em até 1 parágrafo, exibida no popup.
-//   - "image":  recorte da tela (Ctrl+Shift+3) → captura a aba, corta o retângulo e
+//   - "image":  recorte da tela (Alt+C) → captura a aba, corta o retângulo e
 //     manda a imagem ao Gemini (visão); responde como "choice". Útil quando o texto
 //     não é selecionável (dentro de botões, canvas, etc.).
 // IMPORTANTE: nada de estado em memória entre eventos. O SW pode ser desligado a
@@ -98,7 +98,7 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
   }
 });
 
-// Atalhos: Ctrl+Shift+1 → alternativa, Ctrl+Shift+2 → aberta, Ctrl+Shift+3 → recorte de imagem.
+// Atalhos: Alt+Z → alternativa, Alt+X → aberta, Alt+C → recorte de imagem.
 chrome.commands.onCommand.addListener(async (command) => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) return;
