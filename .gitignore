@@ -15,3 +15,8 @@ Thumbs.db
 node_modules/
 dist/
 *.zip
+
+# Contexto / notas internas (nao publicar)
+orientacao.txt
+.claude/
+CLAUDE.md
